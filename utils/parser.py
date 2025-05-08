@@ -8,6 +8,9 @@ import time
 import random
 import MySQLdb
 from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from pyquery import PyQuery as pq
 from bs4 import BeautifulSoup
 
@@ -21,39 +24,48 @@ def get_courses_url(course_url, driver):
     '''
     link_list = []
     driver.get(course_url)
-    time.sleep(3)
+    time.sleep(5)  # 增加等待时间
+    
     try:
-        # remove the close-icon
-        driver.find_element_by_class_name("u-icon-close").click()
-
+        # 使用显式等待查找关闭按钮
+        close_button = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CLASS_NAME, "u-icon-close"))
+        )
+        close_button.click()
     except Exception:
         pass
 
     while True:
-        # get the page source
-        html = driver.page_source
-        soup = BeautifulSoup(html, 'html.parser')
-        link_area = soup.find_all('div', {'class': 'cnt f-pr'})
-        for tags in link_area:
-            tag = tags.find_all('a')
-            for a in tag:
-                link = a.get('href')
-                try:
-                    if link.__contains__(
-                            'www') and not link.__contains__('http'):
-                        link = 'https:' + link
-                        link_list.append(link)
-                except Exception:
-                    continue
+        try:
+            # get the page source
+            html = driver.page_source
+            soup = BeautifulSoup(html, 'html.parser')
+            link_area = soup.find_all('div', {'class': 'cnt f-pr'})
+            for tags in link_area:
+                tag = tags.find_all('a')
+                for a in tag:
+                    link = a.get('href')
+                    try:
+                        if link and 'www' in link and 'http' not in link:
+                            link = 'https:' + link
+                            link_list.append(link)
+                    except Exception:
+                        continue
 
-        # auto click the next page
-        next_page = driver.find_element_by_xpath(
-            '//li[@class="ux-pager_btn ux-pager_btn__next"]/a')
-        next_page.click()
-        time.sleep(random.randint(1, 3))
+            # 使用显式等待查找下一页按钮
+            next_page = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "li.ux-pager_btn.ux-pager_btn__next a"))
+            )
+            
+            # 检查是否是最后一页
+            if "th-bk-disable-gh" in next_page.get_attribute("class"):
+                break
+                
+            next_page.click()
+            time.sleep(random.randint(2, 4))  # 增加随机等待时间
 
-        if next_page.get_attribute("class") == "th-bk-disable-gh":
-            link_list.append(link)
+        except Exception as e:
+            print(f"Error occurred: {str(e)}")
             break
 
     link_list = list(set(link_list))
@@ -67,13 +79,18 @@ def paser_comments(url, category, driver):
     @return: category, course_name, teacher, url, names_list, comments_list, created_time_list, course_times_list, voteup_list, rating_list
     '''
     driver.get(url)
-    cont = driver.page_source
-    soup = BeautifulSoup(cont, 'html.parser')
-
-    find_comments = driver.find_element_by_id(
-        "review-tag-button")  # click the comment tag
-    find_comments.click()
-    time.sleep(1)
+    time.sleep(5)  # 增加等待时间
+    
+    try:
+        # 使用显式等待查找评论按钮
+        find_comments = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.ID, "review-tag-button"))
+        )
+        find_comments.click()
+        time.sleep(2)
+    except Exception as e:
+        print(f"Error clicking comment button: {str(e)}")
+        return None
 
     # get the course name and teacher info
     info = pq(driver.page_source)
@@ -90,36 +107,34 @@ def paser_comments(url, category, driver):
     rating_list = []  # rating
 
     while True:
-        page_source = driver.page_source
-        soup = BeautifulSoup(page_source, 'html.parser')
         try:
+            page_source = driver.page_source
+            soup = BeautifulSoup(page_source, 'html.parser')
+            
             # use bs4 to locate the comments
             content = soup.find_all('div', {
-                'class':
-                'ux-mooc-comment-course-comment_comment-list_item_body'
+                'class': 'ux-mooc-comment-course-comment_comment-list_item_body'
             })
 
-            for ctt in content:
+            if not content:  # 如果没有找到评论内容，退出循环
+                break
 
+            for ctt in content:
                 author_name = ctt.find_all(
                     'a', {
-                        'class':
-                        'primary-link ux-mooc-comment-course-comment_comment-list_item_body_user-info_name'
+                        'class': 'primary-link ux-mooc-comment-course-comment_comment-list_item_body_user-info_name'
                     })
                 comments = ctt.find_all(
                     'div', {
-                        'class':
-                        'ux-mooc-comment-course-comment_comment-list_item_body_content'
+                        'class': 'ux-mooc-comment-course-comment_comment-list_item_body_content'
                     })
                 created_time = ctt.find_all(
                     'div', {
-                        'class':
-                        'ux-mooc-comment-course-comment_comment-list_item_body_comment-info_time'
+                        'class': 'ux-mooc-comment-course-comment_comment-list_item_body_comment-info_time'
                     })
                 course_times = ctt.find_all(
                     'div', {
-                        'class':
-                        'ux-mooc-comment-course-comment_comment-list_item_body_comment-info_term-sign'
+                        'class': 'ux-mooc-comment-course-comment_comment-list_item_body_comment-info_term-sign'
                     })
                 voteup = ctt.find_all('span', {'primary-link'})
                 rating = ctt.find_all('div', {"star-point"})
@@ -139,63 +154,20 @@ def paser_comments(url, category, driver):
                 for r in rating:
                     rating_list.append(str(len(r)))
 
-            # auto click the next page
-            next_page = driver.find_element_by_xpath(
-                '//li[@class="ux-pager_btn ux-pager_btn__next"]/a')
-            next_page.click()
-            time.sleep(random.randint(1, 3))
-
-            if next_page.get_attribute("class") == "th-bk-disable-gh":
-                page_source = driver.page_source
-                soup = BeautifulSoup(page_source, 'html.parser')
-                # if the page is the last page, then get the last page's source page
-                content = soup.find_all(
-                    'div', {
-                        'class':
-                        'ux-mooc-comment-course-comment_comment-list_item_body'
-                    })
-
-                for ctt in content:
-
-                    author_name = ctt.find_all(
-                        'a', {
-                            'class':
-                            'primary-link ux-mooc-comment-course-comment_comment-list_item_body_user-info_name'
-                        })
-                    comments = ctt.find_all(
-                        'div', {
-                            'class':
-                            'ux-mooc-comment-course-comment_comment-list_item_body_content'
-                        })
-                    created_time = ctt.find_all(
-                        'div', {
-                            'class':
-                            'ux-mooc-comment-course-comment_comment-list_item_body_comment-info_time'
-                        })
-                    course_times = ctt.find_all(
-                        'div', {
-                            'class':
-                            'ux-mooc-comment-course-comment_comment-list_item_body_comment-info_term-sign'
-                        })
-                    voteup = ctt.find_all('span', {'primary-link'})
-                    rating = ctt.find_all('div', {"star-point"})
-
-                    for userid in author_name:
-                        userid_list.append(userid.get('href').split('=')[-1])
-                    for name in author_name:
-                        names_list.append(name.text)
-                    for comment in comments:
-                        comments_list.append(comment.text.strip('\n'))
-                    for ct in created_time:
-                        created_time_list.append(ct.text)
-                    for cts in course_times:
-                        course_times_list.append(cts.text)
-                    for vt in voteup:
-                        voteup_list.append(vt.text.strip('\n'))
-                    for r in rating:
-                        rating_list.append(str(len(r)))
+            # 使用显式等待查找下一页按钮
+            next_page = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "li.ux-pager_btn.ux-pager_btn__next a"))
+            )
+            
+            # 检查是否是最后一页
+            if "th-bk-disable-gh" in next_page.get_attribute("class"):
                 break
-        except Exception:
+                
+            next_page.click()
+            time.sleep(random.randint(2, 4))  # 增加随机等待时间
+
+        except Exception as e:
+            print(f"Error occurred: {str(e)}")
             break
 
     return category, course_name, teacher, url, userid_list, names_list, comments_list, created_time_list, course_times_list, voteup_list, rating_list

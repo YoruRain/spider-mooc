@@ -8,16 +8,19 @@ import MySQLdb
 from selenium import webdriver
 from utils.parser import get_courses_url, paser_comments
 from utils.saver import saver
-
+from selenium.webdriver.chrome.service import Service
 
 def main():
     '''
     @description: This is the main function to set the database info and load the webdriver, then start the crawler
     '''
     conn = MySQLdb.connect(
-        '127.0.0.1', 'root', 'ROOT', 'mooc', charset='utf8', use_unicode=True)
+        '127.0.0.1', 'root', 'Bakals040102', 'mooc', charset='utf8', use_unicode=True)
     cursor = conn.cursor()
-    driver = webdriver.Chrome(executable_path=r"drivers/chromedriver.exe")
+    # driver = webdriver.Chrome(executable_path=r"drivers/chromedriver.exe")
+    service = Service(executable_path=r"drivers/chromedriver.exe")
+    driver = webdriver.Chrome(service=service)
+    
     driver.maximize_window()
     # category list from mooc category
     # category_list = [
