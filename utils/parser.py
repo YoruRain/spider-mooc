@@ -27,7 +27,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('spider.log', encoding='utf-8'),
+        logging.FileHandler('logs/spider.log', encoding='utf-8'),
         logging.StreamHandler()
     ]
 )
@@ -153,7 +153,68 @@ def parse_comments(url: str, driver: webdriver.Chrome) -> Optional[Tuple]:
             info = pq(driver.page_source)
             category = info(".breadcrumb_item.sub-category").text()
             course_name = info(".course-title.f-ib.f-vam").text()
-            teacher = info(".cnt.f-fl").text().replace("\n", " ")
+            
+            # 获取评论数
+            review_num_text = info("#review-tag-num").text()
+            if not review_num_text:  # 处理没有评价的情况
+                logging.info(f"课程 {course_name} 没有评价，跳过")
+                return (course_name,)
+                
+            review_num = int(review_num_text.strip('()'))  # 移除括号并转换为整数
+            
+            # 如果评论数小于50，直接返回None
+            if review_num < 50:
+                logging.info(f"课程 {course_name} 的评论数 {review_num} 小于50，跳过")
+                return (course_name,)
+            
+            # 获取所有教师姓名
+            teachers = []
+            # 获取当前页面显示的教师
+            teacher_elements = info(".um-list-slider_con_item h3.f-fc3")
+            for teacher in teacher_elements:
+                teachers.append(teacher.text)
+            
+            # 检查是否有更多页面
+            indicators = info(".um-list-slider_indicator")
+            if len(indicators) > 1:  # 如果有多个指示器，说明有多个页面
+                current_page = 1  # 从第二页开始（因为第一页已经处理过了）
+                total_pages = len(indicators)
+                
+                while current_page < total_pages:
+                    try:
+                        # 获取所有指示器
+                        all_indicators = driver.find_elements(By.CSS_SELECTOR, ".um-list-slider_indicator")
+                        # 找到当前选中的指示器
+                        selected_index = -1
+                        for i, indicator in enumerate(all_indicators):
+                            if "z-sel" in indicator.get_attribute("class"):
+                                selected_index = i
+                                break
+                        
+                        if selected_index == -1 or selected_index + 1 >= len(all_indicators):
+                            break
+                            
+                        # 点击下一个指示器
+                        all_indicators[selected_index + 1].click()
+                        time.sleep(2)  # 等待页面加载
+                        info = pq(driver.page_source)  # 更新页面信息
+                        
+                        # 获取当前页面显示的教师
+                        teacher_elements = info(".um-list-slider_con_item h3.f-fc3")
+                        for teacher in teacher_elements:
+                            teachers.append(teacher.text)
+                            
+                        current_page += 1
+                            
+                    except Exception as e:
+                        logging.error(f"切换教师页面时发生错误: {str(e)}")
+                        break
+            
+            # 将所有教师姓名用空格连接
+            teacher = " ".join(teachers)
+        
+            
+            logging.info(f"开始爬取课程 {course_name}({url}) 的评论")
 
             # 初始化参数列表
             userid_list = []
@@ -164,6 +225,7 @@ def parse_comments(url: str, driver: webdriver.Chrome) -> Optional[Tuple]:
             voteup_list = []
             rating_list = []
 
+            page_num = 0
             while True:
                 try:
                     page_source = driver.page_source
@@ -176,6 +238,7 @@ def parse_comments(url: str, driver: webdriver.Chrome) -> Optional[Tuple]:
                     if not content:
                         logging.info(f"课程 {course_name} 没有更多评论")
                         break
+
 
                     for ctt in content:
                         try:
@@ -225,13 +288,15 @@ def parse_comments(url: str, driver: webdriver.Chrome) -> Optional[Tuple]:
                         
                         # 检查按钮是否已禁用
                         if "th-bk-disable-gh" in next_page.get_attribute("class"):
-                            logging.info("已到达最后一页")
+                            logging.info(f"已到达 {course_name} 的 最后一页评论")
                             break
-                            
+
+                        page_num += 1
+                        logging.info(f"已爬取 {course_name} 的 {page_num} 页评论")
                         next_page.click()
                         time.sleep(random.randint(CONFIG['RANDOM_WAIT_MIN'], CONFIG['RANDOM_WAIT_MAX']))
                     except Exception as e:
-                        logging.info("已到达最后一页")
+                        logging.info(f"已到达 {course_name} 的 最后一页评论")
                         break
 
                 except Exception as e:
@@ -307,14 +372,14 @@ def get_school_name_from_course_url(course_url):
         str: 学校名称，如果未找到则返回None
     """
     # 从URL中提取学校代码
-    match = re.search(r'course/([A-Z]+)-', course_url)
+    match = re.search(r'course/([A-Za-z]+)-', course_url)
     if not match:
         return None
     
     school_code = match.group(1)
     
     # 读取school_url.json文件
-    with open('data/school_url.json', 'r', encoding='utf-8') as f:
+    with open('data/school_urls.json', 'r', encoding='utf-8') as f:
         school_dict = json.load(f)
     
     # 遍历学校字典，查找匹配的学校代码

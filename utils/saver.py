@@ -7,6 +7,21 @@
 # import MySQLdb
 import pymysql
 import json
+import logging
+from pathlib import Path
+
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('logs/spider.log', encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
+
+# 确保数据目录存在
+Path('data').mkdir(exist_ok=True)
 
 with open("config.json", 'r', encoding='utf-8') as f:
     config = json.load(f)
@@ -20,33 +35,32 @@ def saver(school, category, course_name, teacher, url, userid_list, names_list,
     @param All field in mysql; {"conn,cursor": the code to use mysql}
     @return: None
     '''
-    # saving to database
+    # 准备批量插入的数据
+    values_list = []
     for i in range(len(names_list)):
-        userid = userid_list[i]
-        author_name = names_list[i]
-        comments = comments_list[i]
-        created_time = created_time_list[i]
-        course_times = course_times_list[i]
-        voteup = voteup_list[i]
-        rating = rating_list[i]
         values = [
-            school, category, course_name, teacher, url, userid, author_name, comments,
-            created_time, course_times, voteup, rating
+            school, category, course_name, teacher, url, 
+            userid_list[i], names_list[i], comments_list[i],
+            created_time_list[i], course_times_list[i], 
+            voteup_list[i], rating_list[i]
         ]
-        cols = [
-            "school", "category", "course_name", "teacher", "url", "userid", "author_name", "comments",
-            "created_time", "course_times", "voteup", "rating"
-        ]
+        values_list.append(values)
 
-        insert_sql = f"""INSERT INTO comments({", ".join(cols)}) 
-        VALUES ({", ".join(["%s"] * len(values))})"""
-        
-        try:
-            with pymysql.connect(**config["database"]) as conn:
-                with conn.cursor() as cursor:
-                    cursor.execute(insert_sql, values)
-                    conn.commit()
-                    print("{}-{}-{}: saving to database successful".format(
-                        userid, author_name, course_name))
-        except Exception as e:
-            print(f"Error saving to database: {e}")
+    cols = [
+        "school", "category", "course_name", "teacher", "url", 
+        "userid", "author_name", "comments",
+        "created_time", "course_times", "voteup", "rating"
+    ]
+
+    insert_sql = f"""INSERT INTO comments({", ".join(cols)}) 
+    VALUES ({", ".join(["%s"] * len(cols))})"""
+    
+    try:
+        with pymysql.connect(**config["database"]) as conn:
+            with conn.cursor() as cursor:
+                cursor.executemany(insert_sql, values_list)
+                conn.commit()
+                logging.info(f"课程 {course_name} 的 {len(names_list)} 条评论批量保存成功")
+    
+    except Exception as e:
+        logging.error(f"将课程 {course_name} 的评论批量保存到数据库时发生错误: {e}")
